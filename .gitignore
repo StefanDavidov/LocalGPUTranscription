@@ -1,0 +1,24 @@
+# Ignore the Virtual Environment (THIS IS THE CULPRIT)
+venv/
+env/
+.env
+
+# Ignore Python compiled files
+__pycache__/
+*.py[cod]
+
+# Ignore Large Models (unless you specifically used Git LFS for them)
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# Ignore the models folder
+models/
+
+# Ignore large video files
+*.mp4
+
+# Ignore the virtual environment (if not already there)
+venv/
+__pycache__/
