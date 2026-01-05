@@ -1,5 +1,10 @@
 import sys
 import os
+
+# SET OFFLINE CACHE PATH
+# This ensures we use the models included in the zip, not the global user cache
+os.environ["HF_HOME"] = os.path.join(os.getcwd(), "models", "huggingface_cache")
+
 import threading
 import queue
 import tempfile
@@ -43,8 +48,8 @@ def flush_log():
         pass
 
 # Import our backend
-from transcribe import VideoTranscriber
-from export_utils import export_to_pdf
+# from transcribe import VideoTranscriber  <-- MOVED TO LAZY IMPORT
+# from export_utils import export_to_pdf   <-- MOVED TO LAZY IMPORT
 
 # Set appearance mode and color theme
 ctk.set_appearance_mode("dark")
@@ -96,6 +101,9 @@ class VideoPlayer(ctk.CTkFrame):
         self.canvas = ctk.CTkLabel(self, text="🎬 Load a video to begin", 
                                     font=("Segoe UI", 18), text_color="#666666")
         self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 5))
+        
+        # Click to play/pause
+        self.canvas.bind("<Button-1>", lambda e: self._toggle_playback())
         
         # Controls frame
         controls_frame = ctk.CTkFrame(self, fg_color="transparent", height=80)
@@ -585,6 +593,10 @@ class TranscriptionApp(ctk.CTk):
         self.batch_size = 50
         self.current_render_index = 0
         
+        # Following Mode State
+        self.following_mode = False
+        self._last_highlighted_index = -1
+        
         self.init_ui()
         
         # Handle window close properly
@@ -619,6 +631,12 @@ class TranscriptionApp(ctk.CTk):
         self.btn_export = ctk.CTkButton(toolbar, text="📄 Export PDF", width=120, command=self.export_pdf)
         self.btn_export.pack(side="left", padx=5, pady=10)
         
+        # Following Mode Toggle
+        self.btn_follow = ctk.CTkButton(toolbar, text="Follow Mode", width=100, 
+                                         fg_color="#424242", hover_color="#616161",
+                                         command=self.toggle_following_mode)
+        self.btn_follow.pack(side="left", padx=5, pady=10)
+        
         # ===== MAIN CONTENT (Video + Transcript) =====
         content_frame = ctk.CTkFrame(self, fg_color="transparent")
         content_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -642,7 +660,7 @@ class TranscriptionApp(ctk.CTk):
                                               state="disabled", cursor="arrow")
         self.transcript_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
-        # Bind scroll event for infinite loading
+        # Bind scroll event for infinite loading AND disable following mode
         self.transcript_box.bind("<MouseWheel>", self.on_transcript_scroll)
         self.transcript_box.bind("<Button-1>", self.on_transcript_click)
         self.transcript_box.bind("<Motion>", self.on_transcript_hover)
@@ -721,6 +739,9 @@ class TranscriptionApp(ctk.CTk):
     def _transcription_worker(self, video_path, num_speakers=None):
         """Background worker for transcription."""
         try:
+            # Lazy Import Backend (Optimizes Startup Time)
+            from transcribe import VideoTranscriber
+            
             # Create transcriber and store reference to prevent GC during GUI session
             # CRITICAL: If transcriber is garbage collected while CUDA resources exist,
             # it causes a crash in the tkinter mainloop
@@ -920,8 +941,14 @@ class TranscriptionApp(ctk.CTk):
             pass
 
     def on_transcript_scroll(self, event):
-        """Handle scroll event for infinite loading."""
+        """Handle scroll event for infinite loading and disable following mode."""
         try:
+            # Disable following mode when user manually scrolls
+            if self.following_mode:
+                self.following_mode = False
+                self.btn_follow.configure(fg_color="#424242")
+                self._clear_following_highlight()
+            
             bottom_visible = self.transcript_box.yview()[1]
             if bottom_visible > 0.9 and self.current_render_index < len(self.transcript_data):
                 self.append_batch()
@@ -972,6 +999,109 @@ class TranscriptionApp(ctk.CTk):
                     break
         except Exception as e:
             log_debug(f"Click handling error: {e}")
+    
+    def toggle_following_mode(self):
+        """Toggle the following mode on/off."""
+        self.following_mode = not self.following_mode
+        
+        if self.following_mode:
+            # Enable - darker/highlighted button
+            self.btn_follow.configure(fg_color="#1976d2", hover_color="#1565c0")
+            # Start the following highlight loop
+            self._update_following_highlight()
+        else:
+            # Disable - normal button
+            self.btn_follow.configure(fg_color="#424242", hover_color="#616161")
+            self._clear_following_highlight()
+    
+    def _update_following_highlight(self):
+        """Update transcript highlight based on current video position."""
+        if not self.following_mode:
+            return
+            
+        try:
+            # Get current video position in seconds
+            if not self.video_player.cap:
+                self.after(200, self._update_following_highlight)
+                return
+                
+            current_time = self.video_player.current_frame / self.video_player.fps if self.video_player.fps > 0 else 0
+            
+            # Find the transcript segment that matches current time
+            current_index = -1
+            for i, item in enumerate(self.transcript_data):
+                if item['start'] <= current_time < item.get('end', item['start'] + 10):
+                    current_index = i
+                    break
+            
+            # Only update if we moved to a different segment
+            if current_index != self._last_highlighted_index and current_index >= 0:
+                self._clear_following_highlight()
+                self._last_highlighted_index = current_index
+                
+                # FORCE RENDER if segment hasn't been loaded yet
+                if current_index >= self.current_render_index:
+                    # We need to render up to (and including) this segment
+                    segments_needed = current_index - self.current_render_index + 1
+                    original_batch_size = self.batch_size
+                    self.batch_size = segments_needed
+                    self.append_batch()
+                    self.batch_size = original_batch_size
+                
+                # Calculate the text position for this segment
+                # We need to find the line in the textbox corresponding to this segment
+                start_ms = int(self.transcript_data[current_index]['start'] * 1000)
+                tag_name = f"ts_{start_ms}"
+                
+                # Configure highlight tag
+                self.transcript_box.tag_config("following_highlight", background="#3a3a3a")
+                
+                # Find tag range and highlight the whole line
+                try:
+                    tag_ranges = self.transcript_box.tag_ranges(tag_name)
+                    if tag_ranges:
+                        # Get the line containing this timestamp
+                        line_start = self.transcript_box.index(f"{tag_ranges[0]} linestart")
+                        line_end = self.transcript_box.index(f"{tag_ranges[1]} lineend +1 line")
+                        
+                        self.transcript_box.tag_add("following_highlight", line_start, line_end)
+                        
+                        # Auto-scroll to CENTER the highlighted text
+                        # Get the line number of the highlighted text
+                        line_num = int(line_start.split('.')[0])
+                        
+                        # Get total number of lines in the widget
+                        total_lines = int(self.transcript_box.index('end-1c').split('.')[0])
+                        
+                        # Calculate visible height as fraction of total
+                        visible_fraction = self.transcript_box.yview()[1] - self.transcript_box.yview()[0]
+                        
+                        # Calculate scroll position to center the line
+                        # We want the line to be in the middle of the visible area
+                        line_fraction = line_num / max(total_lines, 1)
+                        center_offset = visible_fraction / 2
+                        scroll_position = max(0, line_fraction - center_offset)
+                        
+                        self.transcript_box.yview_moveto(scroll_position)
+                except Exception as e:
+                    log_debug(f"Highlight error: {e}")
+                    pass
+                    
+        except Exception as e:
+            log_debug(f"Following highlight error: {e}")
+            
+        # Continue polling
+        if self.following_mode:
+            self.after(200, self._update_following_highlight)
+    
+    def _clear_following_highlight(self):
+        """Clear any existing following highlight."""
+        try:
+            self.transcript_box.tag_remove("following_highlight", "1.0", "end")
+            self._last_highlighted_index = -1
+        except:
+            pass
+            
             
     def rename_speaker_dialog(self):
         """Show dialog to rename a speaker."""
@@ -1013,6 +1143,9 @@ class TranscriptionApp(ctk.CTk):
         if not self.transcript_data:
             messagebox.showwarning("Export", "No transcript data to export.")
             return
+
+        # Lazy Import Export Utils
+        from export_utils import export_to_pdf
             
         file_path = filedialog.asksaveasfilename(
             title="Save PDF",

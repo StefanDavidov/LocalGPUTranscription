@@ -3,6 +3,11 @@ from dotenv import load_dotenv
 
 # Load env vars
 load_dotenv()
+
+# SET OFFLINE CACHE PATH
+# Ensures we use the local models folder if run directly
+os.environ["HF_HOME"] = os.path.join(os.getcwd(), "models", "huggingface_cache")
+
 # DISABLE SYMLINKS to fix Windows permission issues
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1" 
@@ -31,7 +36,7 @@ class VideoTranscriber:
         self.auth_token = os.getenv("HUGGINGFACE_API_KEY")
         
         if not self.auth_token:
-            print("WARNING: HUGGINGFACE_API_KEY missing in .env. Diarization may fail.")
+            print("No API key found. Attempting to load Pyannote from local offline cache...")
         
         try:
             # Fix for PyTorch 2.6+ security change causing "WeightsUnpickler error"
@@ -44,7 +49,7 @@ class VideoTranscriber:
 
             self.diarization_pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
-                use_auth_token=self.auth_token
+                use_auth_token=self.auth_token  # If None, looks for local cache
             )
             if self.device == "cuda":
                 self.diarization_pipeline.to(torch.device("cuda"))
