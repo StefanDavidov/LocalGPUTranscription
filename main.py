@@ -1,7 +1,5 @@
 import sys
 import os
-import time
-import json
 import threading
 import queue
 import tempfile
@@ -45,7 +43,6 @@ def flush_log():
         pass
 
 # Import our backend
-# Import our backend
 from transcribe import VideoTranscriber
 from export_utils import export_to_pdf
 
@@ -60,7 +57,7 @@ SPEAKER_COLORS = ["#d32f2f", "#1976d2", "#388e3c", "#fbc02d", "#8e24aa", "#f57c0
 class VideoPlayer(ctk.CTkFrame):
     """Custom video player widget using OpenCV and PIL with full controls and audio."""
     
-    def __init__(self, parent, on_position_change=None, **kwargs):
+    def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         
         self.video_path = None
@@ -71,13 +68,11 @@ class VideoPlayer(ctk.CTkFrame):
         self.fps = 30
         self.frame_delay = 33  # ms between frames
         self.volume = 1.0  # 0.0 to 1.0
-        self.on_position_change = on_position_change
         self._seeking = False  # Prevent update conflicts during seek
         
         # Audio state
         self._audio_file = None  # Temporary audio file path
         self._audio_loaded = False
-        self._audio_start_time = 0  # System time when audio started
         self._audio_start_offset = 0  # Video time offset when audio started
         self._audio_paused = False  # Track if audio was specifically paused
         
@@ -334,8 +329,6 @@ class VideoPlayer(ctk.CTkFrame):
             self.btn_play.configure(text="▶")
             if self._audio_loaded:
                 pygame.mixer.music.stop()
-            if self.on_position_change:
-                self.on_position_change("ended")
                 
     def _on_seek_slider(self, value):
         """Handle seek slider movement."""
@@ -493,22 +486,6 @@ class VideoPlayer(ctk.CTkFrame):
                 
             # Invalidate pause state so next play() restarts from new position
             self._audio_paused = False
-        
-    def get_position(self):
-        """Get current position in seconds."""
-        if not self.cap:
-            return 0
-        return self.current_frame / self.fps if self.fps > 0 else 0
-        
-    def get_duration(self):
-        """Get total duration in seconds."""
-        if not self.cap:
-            return 0
-        return self.total_frames / self.fps if self.fps > 0 else 0
-        
-    def is_loaded(self):
-        """Check if a video is loaded."""
-        return self.cap is not None and self.cap.isOpened()
 
 
 

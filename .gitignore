@@ -22,3 +22,5 @@ models/
 # Ignore the virtual environment (if not already there)
 venv/
 __pycache__/
+
+.log

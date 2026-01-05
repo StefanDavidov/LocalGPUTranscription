@@ -1,5 +1,4 @@
 import os
-import sys
 from dotenv import load_dotenv
 
 # Load env vars
@@ -10,8 +9,6 @@ os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
 
 import ffmpeg
 import torch
-import torchaudio
-import numpy as np
 from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
 
@@ -196,15 +193,3 @@ class VideoTranscriber:
             os.remove(wav_path)
             
         return final_data
-
-if __name__ == "__main__":
-    # Test script
-    import sys
-    video_file = sys.argv[1] if len(sys.argv) > 1 else "output.mp4"
-    if not os.path.exists(video_file):
-        print(f"File {video_file} not found.")
-    else:
-        app = VideoTranscriber(model_size="small") # use small for test
-        results = app.process_video(video_file)
-        for r in results:
-            print(f"[{r['start']:.2f} - {r['end']:.2f}] {r['speaker']}: {r['text']}")

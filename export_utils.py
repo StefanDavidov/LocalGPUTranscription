@@ -12,10 +12,6 @@ def export_to_pdf(output_path, transcript_data, speaker_names):
     c = canvas.Canvas(output_path, pagesize=LETTER)
     width, height = LETTER
     
-    text_object = c.beginText()
-    text_object.setTextOrigin(inch, height - inch)
-    text_object.setFont("Helvetica", 10)
-    
     # Title
     c.setFont("Helvetica-Bold", 16)
     c.drawString(inch, height - 0.7*inch, "Video Transcript")
